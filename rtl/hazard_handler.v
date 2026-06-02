@@ -1,12 +1,13 @@
 // hazard_handler.v
 module hazard_handler(
-    input  wire        clk,
-    input  wire        rst,
+
+    //input  wire        clk,
+    //input  wire        rst,
 
     // ID 阶段信息
     input  wire [4:0]  id_rs1,
     input  wire [4:0]  id_rs2,
-    input  wire        id_mem_read,
+    //input  wire        id_mem_read,
 
     // EX 阶段信息
     input  wire [4:0]  ex_rd,
@@ -36,43 +37,14 @@ module hazard_handler(
     wire branch_flush = branch_taken || ex_jal || ex_jalr;
 
     // 检测先 branch 后 load (年轻指令是 load)
-    wire branch_then_load = ex_branch && id_mem_read;
+    //wire branch_then_load = ex_branch && id_mem_read;
+    wire branch_then_load = 0;
 
-    // -------------------------------------------------------------------------
-    // 2. 时序逻辑：只处理保守策略的多周期计数状态
-    // -------------------------------------------------------------------------
-    reg [1:0] branch_load_stall_cnt;
-
-    always @(posedge clk or posedge rst) begin
-        if (rst) begin
-            branch_load_stall_cnt <= 2'b00;
-        end else begin
-            // 优先处理分支冲刷，清除计数器
-            if (branch_flush) begin
-                branch_load_stall_cnt <= 2'b00;
-            end 
-            // 启动保守策略 2 周期计数
-            else if (branch_then_load) begin
-                branch_load_stall_cnt <= 2'b10;
-            end 
-            // 倒计时
-            else if (branch_load_stall_cnt != 2'b00) begin
-                branch_load_stall_cnt <= branch_load_stall_cnt - 1'b1;
-            end
-        end
-    end
-
-    // -------------------------------------------------------------------------
-    // 3. 组合逻辑：生成最终的控制信号
-    // -------------------------------------------------------------------------
-    
-    // 判断当前是否有分支延时策略引发的 stall
-    wire branch_stall_active = (branch_load_stall_cnt != 2'b00);
-
+  
     // Stall 信号：load_use 冲突 或 分支后保守等待 时触发
     // 注意：如果是组合逻辑直接给值，生效就是实时的，立刻阻塞下一个时钟沿的更新
-    assign stall_pc    = load_use_hazard || branch_stall_active;
-    assign stall_if_id = load_use_hazard || branch_stall_active;
+    assign stall_pc    = load_use_hazard ;
+    assign stall_if_id = load_use_hazard ;
     assign stalldd     = load_use_hazard; // 仅限 load-use
 
     // Flush 信号：
