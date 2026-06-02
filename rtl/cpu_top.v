@@ -386,11 +386,8 @@ module cpu_top(
 
     // Hazard unit: 处理 load-use、branch-then-load 的 stall，以及分支/跳转时的 flush
     hazard_handler u_hazard (
-        .clk(clk),
-        .rst(rst),
         .id_rs1(rs1),
         .id_rs2(rs2),
-        .id_mem_read(mem_read), // 【修复】：使用译码阶段正确声明的 mem_read 连线
         .ex_rd(ex_rd),
         .ex_mem_read(ex_mem_read),
         .ex_branch(ex_branch),
