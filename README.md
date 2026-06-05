@@ -30,7 +30,7 @@ Rigorously verified with a comprehensive stress‑test, v2.1 now stably supports
 
 
 
-
+## v2.0 更新说明  /  v2.0 Update Note
 
 以嘉豪之名，我们搭建了第一个 5 级流水线 RISC-V CPU。
 *In the name of Jia_hao, we have built our first 5-stage pipelined RISC-V CPU.*
