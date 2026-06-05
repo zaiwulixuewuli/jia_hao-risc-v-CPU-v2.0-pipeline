@@ -1,4 +1,19 @@
-# jia_hao-risc-v-CPU-v2.0-pipeline
+# jia_hao-risc-v-CPU-pipeline
+
+
+
+v2.1 更新说明 / v2.1 Update Note
+
+基于 v2.0 的五级流水线架构，v2.1 将 CPU 内核升级为 六级流水线（IF1 → IF2 → ID → EX → MEM → WB），并将指令存储器（ROM）与数据存储器（DMEM）全面迁移至 同步读取接口，为未来集成 I‑Cache / D‑Cache 奠定了关键基础。新增 写转发（Write Forwarding） 逻辑以彻底消除 Store‑Load 数据冒险；同时修复了流水线停顿时同步 ROM 输出未冻结的隐患，确保取指在任何停顿/冲刷下始终对齐。经地狱级压力测试验证，v2.1 已稳定支持 RV32I 全部 37 条整数指令的正确执行。
+*Building upon v2.0's 5‑stage pipeline, v2.1 upgrades the CPU core to a 6‑stage pipeline (IF1 → IF2 → ID → EX → MEM → WB) and migrates both instruction memory (ROM) and data memory (DMEM) to synchronous read interfaces, laying the critical groundwork for future I‑Cache / D‑Cache integration. Newly added Write Forwarding logic completely eliminates Store‑Load data hazards; a hidden defect where the synchronous ROM output was not properly frozen during pipeline stalls has also been fixed, guaranteeing fetch alignment under any stall/flush condition. Rigorously verified with a comprehensive stress‑test, v2.1 now stably supports correct execution of all 37 RV32I integer instructions.*
+
+2026.6.5
+
+
+
+
+
+
 
 以嘉豪之名，我们搭建了第一个 5 级流水线 RISC-V CPU。
 *In the name of Jia_hao, we have built our first 5-stage pipelined RISC-V CPU.*
