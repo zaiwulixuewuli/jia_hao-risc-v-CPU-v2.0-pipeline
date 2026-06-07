@@ -21,7 +21,7 @@ module cpu_top(
     wire [2:0]  br_type;
     wire        branch_taken;
     wire [31:0] pc_next;
-    wire [31:0] pc_if2;               // IF1/IF2 寄存器输出的 PC，对齐同步 ROM 指令
+    wire [31:0] pc_if2;
     wire [31:0] reg_data1, reg_data2;
     wire [31:0] alu_operand_b;
     wire [31:0] alu_result;
@@ -59,30 +59,35 @@ module cpu_top(
     wire        wb_auipc_sel;
     
     // 内存相关信号
-    wire        mem_read;      // 【修复】：补全顶层译码阶段的读使能信号
-    wire        mem_we;        // 内存写使能 (来自译码器)
-    wire [2:0]  mem_type;      // 内存读写宽度类型 (来自译码器)
-    wire        mem_to_reg;    // 写回寄存器数据源选择 (来自译码器)
-    wire [31:0] mem_read_data; // 从内存读出的数据
-    wire [31:0] reg_write_data; // 实际写回寄存器的数据（ALU结果或内存数据）
+    wire        mem_read;
+    wire        mem_we;
+    wire [2:0]  mem_type;
+    wire        mem_to_reg;
+    wire [31:0] mem_read_data;
+    wire [31:0] reg_write_data;
     
     // J 类指令相关信号
-    wire        jal;           // JAL 指令标志
-    wire        jalr;          // JALR 指令标志
-    wire        rd_from_pc;    // 寄存器数据源选择：1 = PC+4（用于 JAL/JALR 的返回地址）
+    wire        jal;
+    wire        jalr;
+    wire        rd_from_pc;
     
     // Hazard / pipeline control signals
     wire stall_pc;
     wire stall_if1_if2;
     wire stall_if2_id;
-    //wire stall_id_ex;      // 新增：ID/EX 停顿信号
+    wire stall_id_ex;            // 新增：ID/EX 停顿信号
     wire flush_if1_if2;
     wire flush_if2_id;
     wire flush_id_ex;
     wire stalldd;
-    // LUI/AUIPC 指令相关信号
-    wire        lui_sel;       // LUI 指令标志
-    wire        auipc_sel;     // AUIPC 指令标志
+    
+    wire        lui_sel;
+    wire        auipc_sel;
+
+    // ========== 新增信号：store-load 精确地址冲突检测 ==========
+    wire        ex_mem_write;
+    wire [31:0] ex_addr;
+    wire [31:0] id_addr;
 
     // ----------------------------------------------------
     // 1. 取指阶段 (Fetch)
@@ -102,16 +107,14 @@ module cpu_top(
         .stall(stall_if1_if2)
     );
 
-        // IF1 -> IF2 寄存器：将 PC 延迟一拍，与同步 ROM 的指令输出对齐
     if1_if2_reg u_if1_if2 (
         .clk(clk), .rst(rst),
         .stall(stall_if1_if2),
         .flush(flush_if1_if2),
-        .pc_in(pc),              // ✅ 接当前 PC，与 ROM 延迟一拍对齐
+        .pc_in(pc),
         .pc_out(pc_if2)
     );
 
-    // IF2-ID pipeline register: 将取指第二级的 PC/INST 保持到译码阶段
     if2_id_reg u_if2_id (
         .clk(clk),
         .rst(rst),
@@ -137,7 +140,7 @@ module cpu_top(
         .alu_op(alu_op),
         .branch(branch),
         .br_type(br_type),
-        .mem_read(mem_read),   // 【修复】：对齐了原模块未引出的读能使引脚
+        .mem_read(mem_read),
         .mem_we(mem_we),
         .mem_type(mem_type),
         .mem_to_reg(mem_to_reg),
@@ -149,27 +152,34 @@ module cpu_top(
     );
 
     // ----------------------------------------------------
-    // 3. 寄存器堆堆叠 (Register File)
+    // 3. 寄存器堆 (Register File)
     // ----------------------------------------------------
     regfile u_regfile (
         .clk(clk),
         .rst(rst),
         .we(wb_reg_write && (wb_rd != 5'b0)),
         .waddr(wb_rd),
-        .wdata(reg_write_data), // 核心：把 ALU 结果或内存数据写回 (来自 WB stage)
+        .wdata(reg_write_data),
         .raddr1(rs1),
         .rdata1(reg_data1),
         .raddr2(rs2),
         .rdata2(reg_data2)
     );
 
+    // ========== ID 级前向通路（用于地址计算） ==========
+    wire [31:0] forward_rs1;
+    wire mem_match_rs1_id = mem_reg_write && (mem_rd != 5'b0) && (mem_rd == rs1);
+    wire wb_match_rs1_id  = wb_reg_write  && (wb_rd  != 5'b0) && (wb_rd  == rs1) && !mem_match_rs1_id;
+    assign forward_rs1 = mem_match_rs1_id ? mem_alu_result :
+                         (wb_match_rs1_id ? (wb_mem_to_reg ? wb_mem_read_data : wb_alu_result) : reg_data1);
+    assign id_addr = forward_rs1 + imm;
+
     // ------------------------------
-    // ID/EX pipeline register 和相关信号
+    // ID/EX pipeline register
     // ------------------------------
     wire        ex_reg_write;
     wire        ex_mem_to_reg;
     wire        ex_mem_read;
-    wire        ex_mem_write;
     wire [2:0]  ex_mem_type;
     wire        ex_branch;
     wire [2:0]  ex_br_type;
@@ -192,15 +202,13 @@ module cpu_top(
         .clk(clk),
         .rst(rst),
         .flush_id_ex(flush_id_ex),
-        .stall_id_ex(1'b0),   // 新增：连接停顿信号
+        .stall_id_ex(stall_id_ex),      // 使用 stall_id_ex
 
-        // WB 控制信号
         .id_reg_write(reg_we),
         .id_mem_to_reg(mem_to_reg),
         .ex_reg_write(ex_reg_write),
         .ex_mem_to_reg(ex_mem_to_reg),
 
-        // J 类型与写回相关信号
         .id_jal(jal),
         .id_jalr(jalr),
         .id_rd_from_pc(rd_from_pc),
@@ -212,8 +220,7 @@ module cpu_top(
         .ex_lui_sel(ex_lui_sel),
         .ex_auipc_sel(ex_auipc_sel),
 
-        // MEM 控制信号
-        .id_mem_read(mem_read), // 【修复】：连线使用顶层声明好的 mem_read
+        .id_mem_read(mem_read),
         .id_mem_write(mem_we),
         .id_branch(branch),
         .id_mem_type(mem_type),
@@ -224,13 +231,11 @@ module cpu_top(
         .id_br_type(br_type),
         .ex_br_type(ex_br_type),
 
-        // EX 控制信号
         .id_alu_op(alu_op),
         .id_alu_src(alu_src),
         .ex_alu_op(ex_alu_op),
         .ex_alu_src(ex_alu_src),
 
-        // 数据与寄存器编号
         .id_pc(pc_ifid),
         .id_rdata1(reg_data1),
         .id_rdata2(reg_data2),
@@ -249,17 +254,10 @@ module cpu_top(
     );
 
     // ----------------------------------------------------
-    // 4. 执行阶段 (Execute) 与 核心控制 MUX
+    // 4. 执行阶段 (Execute)
     // ----------------------------------------------------
-    // 前向通路：优先从 MEM 转发，其次从 WB 转发，最后使用寄存器堆读出的原始值
     wire [31:0] ex_rdata1_fwd;
     wire [31:0] ex_rdata2_fwd;
-
-    // 前向通路的源信号：来自 EX/MEM 与 MEM/WB pipeline register 的输出
-    wire mem_forward_enable = mem_reg_write && !mem_mem_to_reg;
-    wire [31:0] mem_forward_data = mem_alu_result;
-    wire wb_forward_enable = wb_reg_write;
-    wire [31:0] wb_forward_data = wb_mem_to_reg ? wb_mem_read_data : wb_alu_result;
 
     forward_passing u_forward (
         .ex_rdata1_in(ex_rdata1),
@@ -268,17 +266,16 @@ module cpu_top(
         .ex_rs2(ex_rs2),
         .mem_reg_write(mem_reg_write),
         .mem_rd(mem_rd),
-        .mem_wb_data(mem_alu_result),          // ALU 结果（非 load 时用）
-        .mem_mem_read(mem_mem_read),           // 新增
-        .mem_read_data(mem_read_data),         // 新增：异步 dmem 输出
+        .mem_wb_data(mem_alu_result),
+        .mem_mem_read(mem_mem_read),
+        .mem_read_data(mem_read_data),
         .wb_reg_write(wb_reg_write),
         .wb_rd(wb_rd),
-        .wb_wb_data(wb_forward_data),
+        .wb_wb_data(wb_mem_to_reg ? wb_mem_read_data : wb_alu_result),
         .ex_rdata1_out(ex_rdata1_fwd),
         .ex_rdata2_out(ex_rdata2_fwd)
     );
 
-    // 核心数据选择选择器
     assign alu_operand_b = (ex_alu_src == 1'b1) ? ex_imm : ex_rdata2_fwd;
 
     alu u_alu (
@@ -288,11 +285,12 @@ module cpu_top(
         .result(alu_result),
         .zero(alu_zero)
     );
-    
+
+    assign ex_addr = alu_result;
+
     // =========================================================================
     // 5. 内存阶段 (Memory Access)
     // =========================================================================
-    // EX -> MEM register: 把 EX 的输出锁存在 MEM-stage 可见
     ex_mem_reg u_ex_mem_reg (
         .clk(clk),
         .rst(rst),
@@ -305,7 +303,7 @@ module cpu_top(
         .ex_br_type(ex_br_type),
         .ex_pc(ex_pc),
         .ex_alu_result(alu_result),
-        .ex_rdata2(ex_rdata2_fwd), // 【修复点】：应当传递经过 Forward 之后的最新数据，避免 Store 脏数据冒险
+        .ex_rdata2(ex_rdata2_fwd),
         .ex_rd(ex_rd),
         .ex_jal(ex_jal),
         .ex_jalr(ex_jalr),
@@ -332,7 +330,6 @@ module cpu_top(
         .mem_imm(mem_imm)
     );
 
-    // MEM stage memory access 使用 EX/MEM 中的地址与写数据
     mem_io u_mem_io (
         .clk(clk),
         .mem_we(mem_mem_write),
@@ -342,7 +339,6 @@ module cpu_top(
         .read_data(mem_read_data)
     );
 
-    // MEM -> WB register: 把 MEM 的结果锁存到 WB 阶段
     mem_wb_reg u_mem_wb_reg (
         .clk(clk),
         .rst(rst),
@@ -369,8 +365,7 @@ module cpu_top(
     );
 
     // =========================================================================
-    // 6. 写回阶段 (Write Back) - 数据选择器
-    // 支持：Load/Store, JAL/JALR, LUI/AUIPC
+    // 6. 写回阶段 (Write Back)
     // =========================================================================
     write_back u_write_back (
         .ex_pc(wb_pc),
@@ -385,7 +380,7 @@ module cpu_top(
     );
 
     // =========================================================================
-    // 7. PC 更新逻辑（支持条件分支、无条件跳转、间接跳转）
+    // 7. PC 更新逻辑
     // =========================================================================
     pc_mux u_pc_mux (
         .current_pc(pc),
@@ -401,18 +396,34 @@ module cpu_top(
         .branch_taken(branch_taken)
     );
 
-    // Hazard unit: 处理 load-use、branch-then-load 的 stall，以及分支/跳转时的 flush
+    // =========================================================================
+    // 8. 冒险处理单元 - 支持 store-load 精确地址冲突，包含 stall_id_ex 输出
+    // =========================================================================
     hazard_handler u_hazard (
-        .id_rs1(rs1), .id_rs2(rs2),
-        .ex_rd(ex_rd), .ex_mem_read(ex_mem_read),
-        .ex_branch(ex_branch), .ex_jal(ex_jal), .ex_jalr(ex_jalr),
+        .rst(rst),
+        .clk(clk),
+        .id_rs1(rs1),
+        .id_rs2(rs2),
+        .ex_rd(ex_rd),
+        .ex_mem_read(ex_mem_read),
+        .ex_branch(ex_branch),
+        .ex_jal(ex_jal),
+        .ex_jalr(ex_jalr),
         .branch_taken(branch_taken),
+
+        .ex_mem_write(ex_mem_write),
+        .ex_addr(ex_addr),
+        .id_mem_read(mem_read),
+        .id_addr(id_addr),
+
         .stall_pc(stall_pc),
         .stall_if1_if2(stall_if1_if2),
         .stall_if2_id(stall_if2_id),
         .stalldd(stalldd),
+        .stall_id_ex(stall_id_ex),   // 新增连接
         .flush_if1_if2(flush_if1_if2),
         .flush_if2_id(flush_if2_id),
         .flush_id_ex(flush_id_ex)
     );
+
 endmodule

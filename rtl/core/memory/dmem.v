@@ -7,9 +7,10 @@ module dmem (
     output reg  [31:0] read_data        // 同步读取，寄存器输出
 );
 
+    // 1024 x 32bit 内存
     reg [31:0] ram [0:1023];
 
-    // 初始化 RAM（可综合，大多数工具支持）
+    // 初始化（可综合，大多数工具支持）
     integer idx;
     initial begin
         for (idx = 0; idx < 1024; idx = idx + 1)
@@ -19,70 +20,85 @@ module dmem (
     wire [9:0] word_addr   = addr[11:2];
     wire [1:0] byte_offset = addr[1:0];
 
-    // 写转发：保存上一周期的写信息（用于下一周期读转发，但同步读不需要？）
-    // 实际上同步读时，同一周期内写和读同时发生，需要先写后读的转发。
-    // 我们直接在 always 块内处理：先读原始值，再写，再根据地址相等决定输出。
+    // ----- 写数据整理（将 write_data 放到正确的字节位置）-----
+    wire [31:0] din_word;   // 实际写入 RAM 的 32 位数据
+    assign din_word = (mem_we) ? 
+        ( (mem_type[1:0] == 2'b00) ? (write_data[7:0]  << (byte_offset * 8)) :
+          (mem_type[1:0] == 2'b01) ? (write_data[15:0] << ((byte_offset[1] ? 2 : 0) * 8)) :
+          write_data ) : 32'h0;   // 无写操作时 din_word 无效
 
-    always @(posedge clk) begin
-        // 1. 读取当前地址的原始数据（此时尚未写入新值）
-        reg [31:0] raw_word;
-        raw_word = ram[word_addr];
-
-        // 2. 若写使能，生成新字并写入
+    // ----- 字节写使能生成 -----
+    reg [3:0] we_byte;
+    always @(*) begin
+        we_byte = 4'b0;
         if (mem_we) begin
             case (mem_type[1:0])
                 2'b00: begin  // SB
                     case (byte_offset)
-                        2'b00: raw_word[7:0]   = write_data[7:0];
-                        2'b01: raw_word[15:8]  = write_data[7:0];
-                        2'b10: raw_word[23:16] = write_data[7:0];
-                        2'b11: raw_word[31:24] = write_data[7:0];
+                        2'b00: we_byte[0] = 1'b1;
+                        2'b01: we_byte[1] = 1'b1;
+                        2'b10: we_byte[2] = 1'b1;
+                        2'b11: we_byte[3] = 1'b1;
                     endcase
                 end
                 2'b01: begin  // SH
-                    case (byte_offset[1])
-                        1'b0: raw_word[15:0]  = write_data[15:0];
-                        1'b1: raw_word[31:16] = write_data[15:0];
-                    endcase
+                    if (byte_offset[1] == 1'b0) begin
+                        we_byte[1:0] = 2'b11;
+                    end else begin
+                        we_byte[3:2] = 2'b11;
+                    end
                 end
-                2'b10:        // SW
-                    raw_word = write_data;
-                default: ;
+                2'b10: begin  // SW
+                    we_byte = 4'b1111;
+                end
+                default: we_byte = 4'b0000;
             endcase
-            ram[word_addr] <= raw_word;   // 写入新值
         end
+    end
 
-        // 3. 根据 mem_type 扩展数据并输出到 read_data
-        //    注意：此时 raw_word 已经反映写操作后的新值（如果写使能且地址匹配）
+    // ----- BRAM 写优先 + 字节使能模板（可综合为块 RAM）-----
+    reg [31:0] dout;       // 读数据缓冲
+    always @(posedge clk) begin
+        // 写操作（独立字节使能）
+        if (we_byte[0]) ram[word_addr][7:0]   <= din_word[7:0];
+        if (we_byte[1]) ram[word_addr][15:8]  <= din_word[15:8];
+        if (we_byte[2]) ram[word_addr][23:16] <= din_word[23:16];
+        if (we_byte[3]) ram[word_addr][31:24] <= din_word[31:24];
+
+        // 读操作（写优先：若本周期写使能且地址相同，dout 得到新写入的数据）
+        dout <= ram[word_addr];
+    end
+
+    // ----- 扩展逻辑（基于 dout，组合输出到 read_data）-----
+    always @(*) begin
         case (mem_type)
             3'b000:  // LB
                 case (byte_offset)
-                    2'b00: read_data <= {{24{raw_word[7]}}, raw_word[7:0]};
-                    2'b01: read_data <= {{24{raw_word[15]}}, raw_word[15:8]};
-                    2'b10: read_data <= {{24{raw_word[23]}}, raw_word[23:16]};
-                    2'b11: read_data <= {{24{raw_word[31]}}, raw_word[31:24]};
+                    2'b00: read_data = {{24{dout[7]}}, dout[7:0]};
+                    2'b01: read_data = {{24{dout[15]}}, dout[15:8]};
+                    2'b10: read_data = {{24{dout[23]}}, dout[23:16]};
+                    2'b11: read_data = {{24{dout[31]}}, dout[31:24]};
                 endcase
             3'b001:  // LH
-                case (byte_offset[1])
-                    1'b0: read_data <= {{16{raw_word[15]}}, raw_word[15:0]};
-                    1'b1: read_data <= {{16{raw_word[31]}}, raw_word[31:16]};
-                endcase
+                if (byte_offset[1] == 0)
+                    read_data = {{16{dout[15]}}, dout[15:0]};
+                else
+                    read_data = {{16{dout[31]}}, dout[31:16]};
             3'b010:  // LW
-                read_data <= raw_word;
+                read_data = dout;
             3'b100:  // LBU
                 case (byte_offset)
-                    2'b00: read_data <= {24'b0, raw_word[7:0]};
-                    2'b01: read_data <= {24'b0, raw_word[15:8]};
-                    2'b10: read_data <= {24'b0, raw_word[23:16]};
-                    2'b11: read_data <= {24'b0, raw_word[31:24]};
+                    2'b00: read_data = {24'b0, dout[7:0]};
+                    2'b01: read_data = {24'b0, dout[15:8]};
+                    2'b10: read_data = {24'b0, dout[23:16]};
+                    2'b11: read_data = {24'b0, dout[31:24]};
                 endcase
             3'b101:  // LHU
-                case (byte_offset[1])
-                    1'b0: read_data <= {16'b0, raw_word[15:0]};
-                    1'b1: read_data <= {16'b0, raw_word[31:16]};
-                endcase
-            default:
-                read_data <= raw_word;
+                if (byte_offset[1] == 0)
+                    read_data = {16'b0, dout[15:0]};
+                else
+                    read_data = {16'b0, dout[31:16]};
+            default: read_data = dout;
         endcase
     end
 
