@@ -23,6 +23,7 @@ module cpu_top(
     wire [31:0] pc_next;
     wire [31:0] pc_if2;
     wire [31:0] reg_data1, reg_data2;
+    wire [31:0] alu_operand_a;
     wire [31:0] alu_operand_b;
     wire [31:0] alu_result;
     wire        alu_zero;
@@ -275,11 +276,11 @@ module cpu_top(
         .ex_rdata1_out(ex_rdata1_fwd),
         .ex_rdata2_out(ex_rdata2_fwd)
     );
-
-    assign alu_operand_b = (ex_alu_src == 1'b1) ? ex_imm : ex_rdata2_fwd;
+    assign alu_operand_a = (ex_auipc_sel == 1'b1) ? ex_pc: ex_rdata1_fwd;//选择数据，如果是1那就是auipc指令。嗯。
+    assign alu_operand_b = (ex_alu_src == 1'b1) ? ex_imm : ex_rdata2_fwd;//选择数据，如果是1那就是立即数
 
     alu u_alu (
-        .a(ex_rdata1_fwd),
+        .a(alu_operand_a),
         .b(alu_operand_b),
         .alu_op(ex_alu_op),
         .result(alu_result),

@@ -15,6 +15,14 @@ module rom(
         end
 
         // 测试程序（保持不变）
+        rom_mem[1] = 32'h000100B7; //lui x1, 0x10
+        rom_mem[2] = 32'h00A08113; //addi x2 x1 20
+        //rom_mem[3] = 32'h002081B3; //add x3,x1,x2
+        /*
+        rom_mem[1] = 32'h040000B7; //lui x1 4000
+        rom_mem[4] = 32'h00102423; //sw x1 8（x0）
+        */
+        /*
         rom_mem[0] = 32'h00a00013;
         rom_mem[1] = 32'h00000233;
         rom_mem[2] = 32'h01420193;
@@ -29,6 +37,7 @@ module rom(
         rom_mem[11] = 32'h00000463;
         rom_mem[12] = 32'h01002083;
         rom_mem[13] = 32'h00100413;
+        */
     end
 
     // 同步读取：仅在非停顿周期锁存地址并输出指令

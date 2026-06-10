@@ -1,10 +1,15 @@
-module decoder(
+ //==========================================================================
+ // 文件名: decoder.v
+ // 说明: 指令译码模块，负责将指令字段解码为控制信号和操作数地址。
+ // 日期: 2026-06-07
+ //==========================================================================
+ module decoder(
     input  wire [31:0] inst,        // 输入 32 位指令
     
     // 1. 盲切分的寄存器地址 (不管用不用，先切出来)
-    output wire [4:0]  rs1,
-    output wire [4:0]  rs2,
-    output wire [4:0]  rd,
+    output reg [4:0] rs1,
+    output reg [4:0] rs2,
+    output reg [4:0] rd,
     
     // 2. 盲切分的立即数 (不管用不用，全部生成好)
     output reg  [31:0] imm,
@@ -33,9 +38,12 @@ module decoder(
 );
 
     // 无论什么指令，寄存器位置在 RISC-V 里是绝对固定的，直接连线！
-    assign rs1 = inst[19:15];
-    assign rs2 = inst[24:20];
-    assign rd  = inst[11:7];
+    always @(*) begin
+    rs1 = inst[19:15];
+    rs2 = inst[24:20];
+    rd  = inst[11:7];
+    end
+    // 其他信号默认值...
 
     // 提取常用的部分字段用于后面的条件判断
     wire [6:0] opcode = inst[6:0];
@@ -101,8 +109,11 @@ module decoder(
             // ---------------------------------------------------
             7'b0110111: begin
                 reg_we   = 1'b1;     // 需要写回 rd
-                lui_sel  = 1'b1;     // 标记为 LUI 指令
-                
+                lui_sel  = 1'b1;     // 标记为 LUI 指令 
+                rs1      = 5'b0;     // 强制覆写r1为x0
+                alu_src  = 1'b1;      // 输入imm（立即数）
+                alu_op   = 4'b0000;    // 强制add lui x0
+
                 // 提取 20 位立即数（inst[31:12]），在cpu_top中左移12位
                 imm = {inst[31:12], 12'b0};
             end
@@ -117,7 +128,9 @@ module decoder(
             7'b0010111: begin
                 reg_we    = 1'b1;    // 需要写回 rd
                 auipc_sel = 1'b1;    // 标记为 AUIPC 指令
-                
+                alu_src   = 1'b1;    // imm
+                alu_op    = 4'b0000; // op code
+                 
                 // 提取 20 位立即数（inst[31:12]），在cpu_top中与PC相加
                 imm = {inst[31:12], 12'b0};
             end
