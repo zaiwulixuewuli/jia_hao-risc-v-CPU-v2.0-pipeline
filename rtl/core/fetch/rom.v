@@ -15,6 +15,14 @@ module rom(
         end
 
         // 测试程序（保持不变）
+        rom_mem[0] = 32'h400000B7; //lui  x1,0x40000
+        rom_mem[1] = 32'h02900113; //addi x2,x0,41(data)
+        rom_mem[2] = 32'h03100113; //addi x3,x0,49(cgf)
+        rom_mem[3] = 32'h00400213; //addi x4,x0,4（baut）
+        rom_mem[4] = 32'h00302223; //sw x3,4(x0)
+        rom_mem[5] = 32'h00202023; //sw x2 0(x0)
+        rom_mem[6] = 32'h00402423; //sw x4,8(x0)
+        /*
         rom_mem[1] = 32'h000100B7; //lui x1, 0x10
         rom_mem[2] = 32'h00A08113; //addi x2 x1 20
         //rom_mem[3] = 32'h002081B3; //add x3,x1,x2
